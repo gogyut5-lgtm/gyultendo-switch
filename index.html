@@ -21,7 +21,6 @@
 .score-dialog input{padding:10px;border:2px solid #ffdb90;border-radius:8px;background:#f2eddf;color:#252b48;font-weight:900}
 .score-dialog .pixel-button:disabled{opacity:.5;cursor:wait}
 </style></head><body><div id="app"></div><script>
-
 const __art=(()=>{
 /** Original sprites drawn from pixel rectangles. All coordinates are game-space pixels. */
 const P = {
@@ -389,13 +388,15 @@ function createMeteorGame(canvas, api) {
     for(let i=0;i<count;i++) particles.push({x,y,vx:rand(-120,120),vy:rand(-150,85),life:rand(.25,.72),max:.72,color:colors[Math.floor(Math.random()*colors.length)],size:rand(2,7)});
   }
   function reverse() {
-    if(state!=='playing') { if(state==='ready'||state==='ended') start(); return; }
+    // SPACE is deliberately only a movement control. It must never start/restart
+    // the game after a collision or while a TOP 10 name prompt is on-screen.
+    if(state!=='playing')return;
     player.dir*=-1; streak++; explode(player.x,player.y+13,7,'leaf'); api.beep(450, .055, 'square',.028);
   }
   function end() {
     state='ended';const final=Math.floor(score);
     api.beep(160,.22,'sawtooth',.06);
-    setOverlay(`<div class="result-panel"><span class="result-icon">🦖</span><p class="eyebrow">T-REX REPORT</p><h2>운석 폭풍 종료!</h2><div class="result-big">${final.toLocaleString()}<small>점</small></div><p>${Math.floor(elapsed)}초 생존 · 운석 ${dodged}개 회피</p><p>🏆 온라인 TOP 10에 들었는지 확인합니다.</p><div class="result-actions"><button class="pixel-button orange" data-meteor="rank">🏆 TOP 10 재확인</button><button class="pixel-button" data-meteor="retry">↻ 다시 도전</button></div><small>10위 안에 들면 닉네임 입력창이 자동으로 나타나요.</small></div>`);
+    setOverlay(`<div class="result-panel"><span class="result-icon">🦖</span><p class="eyebrow">T-REX REPORT</p><h2>운석 폭풍 종료!</h2><div class="result-big">${final.toLocaleString()}<small>점</small></div><p>${Math.floor(elapsed)}초 생존 · 운석 ${dodged}개 회피</p><p>🏆 온라인 TOP 10에 들었는지 확인합니다.</p><div class="result-actions"><button class="pixel-button orange" data-meteor="rank">🏆 랭킹 확인 (ENTER)</button><button class="pixel-button" data-meteor="retry">↻ 마우스로 다시 시작</button></div><small>SPACE는 게임 종료 후 동작하지 않아요. ENTER 또는 마우스로 랭킹을 확인하세요.</small></div>`);
     const endedRun=runSequence;
     api.submitScore(final,()=>state==='ended'&&runSequence===endedRun);
   }
@@ -500,15 +501,28 @@ function createMeteorGame(canvas, api) {
   }
 
   function frame(ms){const dt=Math.min(.035,(ms-prev)/1000||.016);prev=ms;update(dt);render(ms);raf=requestAnimationFrame(frame);}
-  setOverlay(`<div class="result-panel start-panel"><span class="result-icon">☄️</span><p class="eyebrow">ONE BUTTON ARCADE</p><h2>운석피하기</h2><p>스페이스를 한 번 누를 때마다 티렉스의 진행 방향이 바뀝니다.<br>체력은 1, 한 번 맞으면 바로 끝납니다!</p><button class="pixel-button orange" data-meteor="retry">▶ 게임 시작</button><small>SPACE 또는 화면 탭으로도 시작할 수 있어요.</small></div>`);
+  setOverlay(`<div class="result-panel start-panel"><span class="result-icon">☄️</span><p class="eyebrow">ONE BUTTON ARCADE</p><h2>운석피하기</h2><p>스페이스를 한 번 누를 때마다 티렉스의 진행 방향이 바뀝니다.<br>체력은 1, 한 번 맞으면 바로 끝납니다!</p><button class="pixel-button orange" data-meteor="retry">▶ 게임 시작</button><small>게임 시작: ENTER / 버튼 클릭 · 플레이 중 SPACE: 방향 전환</small></div>`);
   function onOverlayClick(e){const b=e.target.closest('[data-meteor]');if(!b)return;
     if(b.dataset.meteor==='retry')start();else if(b.dataset.meteor==='rank')api.submitScore(Math.floor(score));
   }
   overlay.addEventListener('click',onOverlayClick);
   raf=requestAnimationFrame(frame);
   return {
-    onKey(e){if(e.code==='Space'){e.preventDefault();if(e.type==='keydown'&&!e.repeat)reverse();} },
-    onPointer(){reverse();},
+    onKey(e){
+      if(e.code==='Space'){
+        e.preventDefault();
+        if(e.type==='keydown'&&!e.repeat&&state==='playing')reverse();
+        return;
+      }
+      if(e.code==='Enter'&&e.type==='keydown'&&!e.repeat){
+        if(state==='ready')start();
+        else if(state==='ended'){
+          const endedRun=runSequence;
+          api.submitScore(Math.floor(score),()=>state==='ended'&&runSequence===endedRun);
+        }
+      }
+    },
+    onPointer(){if(state==='playing')reverse();},
     onCommand(cmd){ if(cmd==='restart')start(); if(cmd==='save-score'&&state==='ended')api.submitScore(Math.floor(score)); },
     getScore:()=>Math.floor(score),
     destroy(){cancelAnimationFrame(raf);overlay.removeEventListener('click',onOverlayClick);overlay.innerHTML='';}
@@ -1091,7 +1105,7 @@ function startGame(id){
   const meta=getGame(id);if(!meta)return;
   if(activeGame)teardownGame();view='play';activeId=id;consoleShell.classList.add('is-playing');
   content.classList.add('playing');
-  content.innerHTML=`<div class="gameplay-page"><div class="gameplay-head"><button class="back-link" data-view="games">‹ 라이브러리</button><div><b>${meta.icon} ${meta.name}</b><small>${meta.genre}</small></div><div class="gameplay-head-right"><button data-game-command="save-score">🏆 TOP 10 도전</button><button data-view="ranks">랭킹 ›</button></div></div><div class="game-stage"><canvas id="gameCanvas" width="640" height="360" aria-label="${meta.name} 실제 게임 화면"></canvas><div id="gameOverlay" class="game-overlay hidden"></div></div><div id="gameDock" class="game-dock"></div><div class="gamehelp-row"><span>🎮 ${meta.controls}</span><span>ESC 또는 B: 뒤로</span></div></div>`;
+  content.innerHTML=`<div class="gameplay-page"><div class="gameplay-head"><button class="back-link" data-view="games">‹ 라이브러리</button><div><b>${meta.icon} ${meta.name}</b><small>${meta.genre}</small></div><div class="gameplay-head-right"><button data-game-command="save-score">🏆 TOP 10 도전</button><button data-view="ranks">랭킹 ›</button></div></div><div class="game-stage"><canvas id="gameCanvas" width="640" height="360" aria-label="${meta.name} 실제 게임 화면"></canvas><div id="gameOverlay" class="game-overlay hidden"></div></div><div id="gameDock" class="game-dock"></div><div class="gamehelp-row"><span>🎮 ${id==='meteor'?'플레이: SPACE 방향 전환 · 종료: ENTER 랭킹 확인':meta.controls}</span><span>ESC 또는 B: 뒤로</span></div></div>`;
   updateNav();
   const canvas=document.getElementById('gameCanvas');
   activeGame=meta.create(canvas,{
@@ -1117,7 +1131,7 @@ async function checkScoreForTop10(id,rawScore,stillValid=()=>true){
     }
     pendingCandidate={id,score:n};
     const game=getGame(id);
-    dialog.innerHTML=`<div class="score-dialog"><p class="eyebrow">🎉 ONLINE TOP 10</p><h2>🏆 ${rank.position}위 진입!</h2><p><strong>${ESC(game.name)}</strong> · <span class="highlight-score">${n.toLocaleString()}점</span></p><p>TOP 10에 들어왔어요! 랭킹에 표시할 닉네임을 입력해 주세요.</p><label for="rankName">닉네임 (최대 12자)</label><input id="rankName" maxlength="12" value="${ESC(settings.playerName)}" autocomplete="off"><div class="modal-buttons"><button class="pixel-button orange" data-score-submit="${id}">🌐 온라인 등록</button><button class="pixel-button" data-dialog-close>취소</button></div><small>등록 직전에 서버 순위를 한 번 더 확인합니다.</small></div>`;
+    dialog.innerHTML=`<div class="score-dialog"><p class="eyebrow">🎉 ONLINE TOP 10</p><h2>🏆 ${rank.position}위 진입!</h2><p><strong>${ESC(game.name)}</strong> · <span class="highlight-score">${n.toLocaleString()}점</span></p><p>TOP 10에 들어왔어요! 랭킹에 표시할 닉네임을 입력해 주세요.</p><label for="rankName">닉네임 (최대 12자)</label><input id="rankName" maxlength="12" value="${ESC(settings.playerName)}" autocomplete="off"><div class="modal-buttons"><button class="pixel-button orange" data-score-submit="${id}">🌐 온라인 등록 (ENTER)</button><button class="pixel-button" data-dialog-close>취소</button></div><small>닉네임 작성 후 ENTER 또는 등록 버튼 클릭. SPACE는 게임 재시작에 사용되지 않습니다.</small></div>`;
     dialog.classList.remove('hidden');
     setTimeout(()=>document.getElementById('rankName')?.focus(),30);
     beep(950,.13,'triangle');
@@ -1177,18 +1191,33 @@ app.addEventListener('pointerdown',e=>{const b=e.target.closest('[data-pad]');if
 app.addEventListener('pointerup',e=>{const b=e.target.closest('[data-pad]');if(b&&view==='play')sendKey(PAD[b.dataset.pad],'keyup');});
 app.addEventListener('pointercancel',e=>{const b=e.target.closest('[data-pad]');if(b&&view==='play')sendKey(PAD[b.dataset.pad],'keyup');});
 window.addEventListener('keydown',e=>{
-  if(e.target.matches('input,textarea,select')){
-    if(e.code==='Enter'&&e.target.id==='rankName')document.querySelector('[data-score-submit]')?.click();
+  const typing=e.target.matches('input,textarea,select');
+  // Never let SPACE activate a focused restart button after game over.
+  // Allow ordinary spaces inside the nickname input, however.
+  if(view==='play'&&activeId==='meteor'&&e.code==='Space'&&!typing)e.preventDefault();
+  if(typing){
+    if(e.code==='Enter'&&e.target.id==='rankName'){
+      e.preventDefault();
+      if(!e.repeat)dialog.querySelector('[data-score-submit]')?.click();
+    }
     return;
   }
-  if(e.code==='Escape'&&!dialog.classList.contains('hidden')){pendingCandidate=null;scoreCheckSequence++;dialog.classList.add('hidden');return;}
+  if(!dialog.classList.contains('hidden')){
+    if(e.code==='Escape'){pendingCandidate=null;scoreCheckSequence++;dialog.classList.add('hidden');return;}
+    if(e.code==='Enter'&&!e.repeat&&!e.target.matches('button')){
+      e.preventDefault();dialog.querySelector('[data-score-submit]')?.click();
+    }
+    return; // An open nickname dialog has exclusive keyboard focus.
+  }
   if(view==='play'){
     if(e.code==='Escape'&&activeId==='meteor'){setView('games');return;}
+    // Let native ENTER-to-click work on game buttons without double-handling.
+    if(e.code==='Enter'&&e.target.matches('button'))return;
     activeGame?.onKey?.(e);
   }else if(e.code==='Escape'&&view!=='games')setView('games');
 });
-window.addEventListener('keyup',e=>{if(view==='play')activeGame?.onKey?.(e);});
+window.addEventListener('keyup',e=>{
+  if(view==='play'&&dialog.classList.contains('hidden')&&!e.target.matches('input,textarea,select'))activeGame?.onKey?.(e);
+});
 setView('games');
-
-
 </script></body></html>
